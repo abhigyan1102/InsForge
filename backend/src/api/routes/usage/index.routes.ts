@@ -102,10 +102,7 @@ usageRouter.get(
       const { start_date, end_date } = validation.data;
 
       // Get usage statistics via service
-      const stats = await usageService.getUsageStats(
-        new Date(start_date),
-        new Date(end_date)
-      );
+      const stats = await usageService.getUsageStats(new Date(start_date), new Date(end_date));
 
       successResponse(res, stats);
     } catch (error) {
