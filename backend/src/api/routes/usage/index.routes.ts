@@ -11,6 +11,11 @@ import { UsageService } from '@/services/usage/usage.service.js';
 import { successResponse } from '@/utils/response.js';
 import { AppError } from '@/api/middlewares/error.js';
 import { ERROR_CODES } from '@/types/error-constants.js';
+import {
+  createMCPUsageSchema,
+  getMCPUsageQuerySchema,
+  getUsageStatsQuerySchema,
+} from './schemas.js';
 
 export const usageRouter = Router();
 const usageService = UsageService.getInstance();
@@ -21,11 +26,16 @@ usageRouter.post(
   verifyApiKey,
   async (req: AuthRequest, res: Response, next: NextFunction) => {
     try {
-      const { tool_name, success = true } = req.body;
-
-      if (!tool_name) {
-        throw new AppError('tool_name is required', 400, ERROR_CODES.INVALID_INPUT);
+      const validation = createMCPUsageSchema.safeParse(req.body);
+      if (!validation.success) {
+        throw new AppError(
+          validation.error.issues.map((e) => `${e.path.join('.')}: ${e.message}`).join(', '),
+          400,
+          ERROR_CODES.INVALID_INPUT
+        );
       }
+
+      const { tool_name, success } = validation.data;
 
       // Create MCP usage record via service
       const result = await usageService.recordMCPUsage(tool_name, success);
@@ -53,10 +63,19 @@ usageRouter.get(
   verifyAdmin,
   async (req: AuthRequest, res: Response, next: NextFunction) => {
     try {
-      const { limit = '5', success = 'true' } = req.query;
+      const validation = getMCPUsageQuerySchema.safeParse(req.query);
+      if (!validation.success) {
+        throw new AppError(
+          validation.error.issues.map((e) => `${e.path.join('.')}: ${e.message}`).join(', '),
+          400,
+          ERROR_CODES.INVALID_INPUT
+        );
+      }
+
+      const { limit, success } = validation.data;
 
       // Get MCP usage records via service
-      const records = await usageService.getMCPUsage(parseInt(limit as string), success === 'true');
+      const records = await usageService.getMCPUsage(limit, success);
 
       successResponse(res, { records });
     } catch (error) {
@@ -71,16 +90,21 @@ usageRouter.get(
   verifyCloudBackend,
   async (req: AuthRequest, res: Response, next: NextFunction) => {
     try {
-      const { start_date, end_date } = req.query;
-
-      if (!start_date || !end_date) {
-        throw new AppError('start_date and end_date are required', 400, ERROR_CODES.INVALID_INPUT);
+      const validation = getUsageStatsQuerySchema.safeParse(req.query);
+      if (!validation.success) {
+        throw new AppError(
+          validation.error.issues.map((e) => `${e.path.join('.')}: ${e.message}`).join(', '),
+          400,
+          ERROR_CODES.INVALID_INPUT
+        );
       }
+
+      const { start_date, end_date } = validation.data;
 
       // Get usage statistics via service
       const stats = await usageService.getUsageStats(
-        new Date(start_date as string),
-        new Date(end_date as string)
+        new Date(start_date),
+        new Date(end_date)
       );
 
       successResponse(res, stats);
