@@ -6,6 +6,13 @@ import { successResponse, paginatedResponse } from '@/utils/response.js';
 import { GetLogsResponse } from '@insforge/shared-schemas';
 import { AppError } from '@/api/middlewares/error.js';
 import { ERROR_CODES } from '@/types/error-constants.js';
+import {
+  auditLogsQuerySchema,
+  auditStatsQuerySchema,
+  auditCleanupQuerySchema,
+  logSearchQuerySchema,
+  logsBySourceQuerySchema,
+} from './schemas.js';
 
 const router = Router();
 
@@ -15,25 +22,34 @@ router.use(verifyAdmin);
 // GET /logs/audits - List audit logs
 router.get('/audits', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const { limit = 100, offset = 0, actor, action, module, start_date, end_date } = req.query;
+    const validation = auditLogsQuerySchema.safeParse(req.query);
+    if (!validation.success) {
+      throw new AppError(
+        validation.error.issues.map((e) => `${e.path.join('.')}: ${e.message}`).join(', '),
+        400,
+        ERROR_CODES.INVALID_INPUT
+      );
+    }
+
+    const { limit, offset, actor, action, module, start_date, end_date } = validation.data;
 
     const auditService = AuditService.getInstance();
 
     // Build query parameters for audit service
     const queryParams = {
-      limit: Number(limit),
-      offset: Number(offset),
-      ...(actor && typeof actor === 'string' && { actor }),
-      ...(action && typeof action === 'string' && { action }),
-      ...(module && typeof module === 'string' && { module }),
-      ...(start_date && typeof start_date === 'string' && { start_date: new Date(start_date) }),
-      ...(end_date && typeof end_date === 'string' && { end_date: new Date(end_date) }),
+      limit,
+      offset,
+      ...(actor && { actor }),
+      ...(action && { action }),
+      ...(module && { module }),
+      ...(start_date && { start_date: new Date(start_date) }),
+      ...(end_date && { end_date: new Date(end_date) }),
     };
 
     // Get audit logs with total count
     const { records, total } = await auditService.query(queryParams);
 
-    paginatedResponse(res, records, total, Number(offset));
+    paginatedResponse(res, records, total, offset);
   } catch (error) {
     next(error);
   }
@@ -42,10 +58,17 @@ router.get('/audits', async (req: AuthRequest, res: Response, next: NextFunction
 // GET /logs/audits/stats - Get audit logs statistics
 router.get('/audits/stats', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const { days = 7 } = req.query;
+    const validation = auditStatsQuerySchema.safeParse(req.query);
+    if (!validation.success) {
+      throw new AppError(
+        validation.error.issues.map((e) => `${e.path.join('.')}: ${e.message}`).join(', '),
+        400,
+        ERROR_CODES.INVALID_INPUT
+      );
+    }
 
     const auditService = AuditService.getInstance();
-    const stats = await auditService.getStats(Number(days));
+    const stats = await auditService.getStats(validation.data.days);
 
     successResponse(res, stats);
   } catch (error) {
@@ -56,10 +79,17 @@ router.get('/audits/stats', async (req: AuthRequest, res: Response, next: NextFu
 // DELETE /logs/audits - Clear audit logs (admin only)
 router.delete('/audits', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const { days_to_keep = 90 } = req.query;
+    const validation = auditCleanupQuerySchema.safeParse(req.query);
+    if (!validation.success) {
+      throw new AppError(
+        validation.error.issues.map((e) => `${e.path.join('.')}: ${e.message}`).join(', '),
+        400,
+        ERROR_CODES.INVALID_INPUT
+      );
+    }
 
     const auditService = AuditService.getInstance();
-    const deletedCount = await auditService.cleanup(Number(days_to_keep));
+    const deletedCount = await auditService.cleanup(validation.data.days_to_keep);
 
     successResponse(res, {
       message: 'Audit logs cleared successfully',
@@ -120,21 +150,21 @@ router.get('/functions/build-logs', async (req: AuthRequest, res: Response, next
 // GET /logs/search - Search across all logs or specific source
 router.get('/search', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const { q, source, limit = 100, offset = 0 } = req.query;
-
-    if (!q || typeof q !== 'string') {
-      throw new AppError('Search query parameter (q) is required', 400, ERROR_CODES.INVALID_INPUT);
+    const validation = logSearchQuerySchema.safeParse(req.query);
+    if (!validation.success) {
+      throw new AppError(
+        validation.error.issues.map((e) => `${e.path.join('.')}: ${e.message}`).join(', '),
+        400,
+        ERROR_CODES.INVALID_INPUT
+      );
     }
 
-    const logService = LogService.getInstance();
-    const result = await logService.searchLogs(
-      q,
-      source as string | undefined,
-      Number(limit),
-      Number(offset)
-    );
+    const { q, source, limit, offset } = validation.data;
 
-    paginatedResponse(res, result.logs, result.total, Number(offset));
+    const logService = LogService.getInstance();
+    const result = await logService.searchLogs(q, source, limit, offset);
+
+    paginatedResponse(res, result.logs, result.total, offset);
   } catch (error) {
     next(error);
   }
@@ -144,14 +174,19 @@ router.get('/search', async (req: AuthRequest, res: Response, next: NextFunction
 router.get('/:source', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { source } = req.params;
-    const { limit = 100, before_timestamp } = req.query;
+    const validation = logsBySourceQuerySchema.safeParse(req.query);
+    if (!validation.success) {
+      throw new AppError(
+        validation.error.issues.map((e) => `${e.path.join('.')}: ${e.message}`).join(', '),
+        400,
+        ERROR_CODES.INVALID_INPUT
+      );
+    }
+
+    const { limit, before_timestamp } = validation.data;
 
     const logService = LogService.getInstance();
-    const result = await logService.getLogsBySource(
-      source,
-      Number(limit),
-      before_timestamp as string | undefined
-    );
+    const result = await logService.getLogsBySource(source, limit, before_timestamp);
 
     const response: GetLogsResponse = {
       logs: result.logs,
